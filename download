@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.pyc
+catalog.db
+.venv/
+venv/
