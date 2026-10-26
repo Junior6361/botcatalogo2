@@ -67,3 +67,10 @@ O bot também tenta reconhecer embeds e anexos de imagem. Posts novos são impor
 
 
 **IDs de cargos:** `ADMIN_ROLE_ID` aceita vários IDs separados por vírgula, por exemplo `ADMIN_ROLE_ID=111111111111111111,222222222222222222`.
+
+
+## Correção de inicialização
+
+Esta versão inclui os eventos `on_ready` e `on_message`, o comando `/painel` e a chamada `bot.run()` que mantém o processo do bot conectado ao Discord. Sem a chamada `bot.run()`, o Python terminava logo após definir as classes e funções.
+
+Na hospedagem, configure `DISCORD_TOKEN`, `SOURCE_CHANNEL_ID`, `ADMIN_ROLE_ID` (IDs de cargos separados por vírgula) e, opcionalmente, `GUILD_ID`. No portal do Discord Developer, habilite **Message Content Intent** para o bot. O bot precisa ter permissão para ler mensagens e adicionar reações no canal de origem.

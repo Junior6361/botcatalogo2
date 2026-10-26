@@ -396,3 +396,62 @@ def source_authorized(member):
         for role in getattr(member, "roles", [])
     )
 
+
+
+@bot.event
+async def on_ready():
+    log.info("Bot conectado como %s (ID: %s)", bot.user, bot.user.id)
+    log.info("Canal de origem configurado: %s", SOURCE_CHANNEL_ID or "não configurado")
+    log.info("Banco de dados: %s", DB_PATH)
+
+
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
+    if not SOURCE_CHANNEL_ID or message.channel.id != SOURCE_CHANNEL_ID:
+        return
+    if not source_authorized(message.author):
+        log.warning("Post ignorado no canal de origem: autor sem permissão (user_id=%s)", message.author.id)
+        return
+
+    data, error = parse_message(message)
+    if error:
+        log.warning("Não foi possível importar a mensagem %s: %s", message.id, error)
+        try:
+            await message.reply(error, mention_author=False)
+        except discord.HTTPException:
+            pass
+        return
+
+    game_id, status = save_game(data, source_message_id=message.id)
+    log.info("Jogo %s: %s (ID %s)", status, data["name"], game_id)
+    try:
+        await message.add_reaction("✅")
+    except discord.HTTPException:
+        pass
+
+
+@bot.tree.command(name="painel", description="Abrir o painel administrativo do catálogo")
+async def painel(interaction: discord.Interaction):
+    if not admin_user(interaction.user):
+        await interaction.response.send_message("Sem permissão.", ephemeral=True)
+        return
+    await interaction.response.send_message(
+        "Painel administrativo do catálogo:",
+        view=AdminView(),
+        ephemeral=True
+    )
+
+
+def main():
+    if not TOKEN:
+        raise RuntimeError(
+            "A variável DISCORD_TOKEN não está configurada na hospedagem. "
+            "Adicione o token do bot nas variáveis de ambiente."
+        )
+    bot.run(TOKEN)
+
+
+if __name__ == "__main__":
+    main()
