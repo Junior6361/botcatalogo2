@@ -74,3 +74,20 @@ O bot também tenta reconhecer embeds e anexos de imagem. Posts novos são impor
 Esta versão inclui os eventos `on_ready` e `on_message`, o comando `/painel` e a chamada `bot.run()` que mantém o processo do bot conectado ao Discord. Sem a chamada `bot.run()`, o Python terminava logo após definir as classes e funções.
 
 Na hospedagem, configure `DISCORD_TOKEN`, `SOURCE_CHANNEL_ID`, `ADMIN_ROLE_ID` (IDs de cargos separados por vírgula) e, opcionalmente, `GUILD_ID`. No portal do Discord Developer, habilite **Message Content Intent** para o bot. O bot precisa ter permissão para ler mensagens e adicionar reações no canal de origem.
+
+
+## Erro `403 Forbidden: Missing Permissions`
+
+Esse erro ocorre quando o Discord não permite que o bot publique no canal selecionado. Nas configurações do servidor, abra **Editar canal → Permissões**, selecione o bot (ou seu cargo) e habilite **Ver canal**, **Enviar mensagens** e **Inserir links**. Para usar comandos, habilite também **Usar comandos de aplicativos**. Verifique se nenhuma permissão negada sobrescreve essas permissões. Depois execute `/painel` e publique em um canal onde o bot tenha acesso.
+
+
+## Erro `50001: Missing Access`
+
+Confirme que o bot está no mesmo servidor do canal e que o canal não está inacessível por permissões. Teste em um canal de texto comum. A versão atual do `main.py` mostra uma resposta explicativa no Discord em vez de deixar o callback do botão falhar sem mensagem.
+
+
+## Separação entre canal de origem e canal do painel
+
+- `SOURCE_CHANNEL_ID`: ID do canal privado onde os administradores publicam nome do jogo, imagem e link de download. O bot importa as mensagens desse canal.
+- `PANEL_CHANNEL_ID`: ID do canal público onde o comando `/painel` publica o painel interativo para os usuários.
+- Os dois IDs devem ser diferentes. O bot precisa conseguir ler o canal de origem e enviar mensagens/embeds no canal público.

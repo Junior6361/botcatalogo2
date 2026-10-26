@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 SOURCE_CHANNEL_ID = int(os.getenv("SOURCE_CHANNEL_ID", "0") or 0)
+PANEL_CHANNEL_ID = int(os.getenv("PANEL_CHANNEL_ID", "0") or 0)
 ADMIN_ROLE_IDS = {
     int(role_id.strip())
     for role_id in os.getenv("ADMIN_ROLE_ID", "").split(",")
@@ -354,20 +355,93 @@ class AdminView(discord.ui.View):
     async def publish(self, interaction, button):
         if not admin_user(interaction.user):
             return await interaction.response.send_message("Sem permissão.", ephemeral=True)
-        message = await interaction.channel.send(
-            embed=discord.Embed(
-                title="Catálogo de ports para PC",
-                description="Pesquise jogos pelo nome, veja a lista ou abra uma ficha individual com imagem e link de download.",
-                color=discord.Color.blurple()
-            ),
-            view=CatalogPanel()
-        )
+
+        channel = interaction.channel
+        guild = interaction.guild
+        if guild is None or channel is None:
+            return await interaction.response.send_message(
+                "Não consegui identificar o servidor ou canal desta interação. "
+                "Execute `/painel` dentro de um canal de texto do servidor.",
+                ephemeral=True
+            )
+
+        bot_member = guild.me
+        if bot_member is None:
+            try:
+                bot_member = await guild.fetch_member(bot.user.id)
+            except discord.HTTPException:
+                return await interaction.response.send_message(
+                    "Não consegui confirmar o acesso do bot a este servidor. "
+                    "Verifique se o bot continua adicionado ao servidor.",
+                    ephemeral=True
+                )
+
+        try:
+            permissions = channel.permissions_for(bot_member)
+            missing = []
+            if not permissions.view_channel:
+                missing.append("Ver canal")
+            if not permissions.send_messages:
+                missing.append("Enviar mensagens")
+            if not permissions.embed_links:
+                missing.append("Inserir links")
+
+            if missing:
+                return await interaction.response.send_message(
+                    "Não posso publicar neste canal. Permissões ausentes: "
+                    + ", ".join(missing)
+                    + ". Abra **Editar canal → Permissões** e permita essas ações "
+                    "ao bot, ou escolha um canal acessível.",
+                    ephemeral=True
+                )
+
+            message = await channel.send(
+                embed=discord.Embed(
+                    title="Catálogo de ports para PC",
+                    description="Pesquise jogos pelo nome, veja a lista ou abra uma ficha individual com imagem e link de download.",
+                    color=discord.Color.blurple()
+                ),
+                view=CatalogPanel()
+            )
+        except discord.NotFound:
+            return await interaction.response.send_message(
+                "O Discord não encontrou este canal. Verifique se ele ainda existe "
+                "e tente executar `/painel` dentro do canal correto.",
+                ephemeral=True
+            )
+        except discord.Forbidden as exc:
+            code = getattr(exc, "code", None)
+            if code == 50001:
+                detail = (
+                    "O bot não tem acesso a este canal ou servidor. Confirme que ele "
+                    "está no mesmo servidor e que o canal não está oculto por permissões."
+                )
+            else:
+                detail = (
+                    "O Discord bloqueou a publicação por falta de permissão. "
+                    "Permita Ver canal, Enviar mensagens e Inserir links."
+                )
+            return await interaction.response.send_message(detail, ephemeral=True)
+        except discord.HTTPException:
+            return await interaction.response.send_message(
+                "O Discord não conseguiu publicar a mensagem agora. Tente novamente.",
+                ephemeral=True
+            )
+
         with connect() as conn:
-            conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                         (f"panel_message:{interaction.guild_id}", str(message.id)))
-            conn.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                         (f"panel_channel:{interaction.guild_id}", str(interaction.channel_id)))
-        await interaction.response.send_message(f"Painel publicado: {message.jump_url}", ephemeral=True)
+            conn.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (f"panel_message:{interaction.guild_id}", str(message.id))
+            )
+            conn.execute(
+                "INSERT INTO settings(key,value) VALUES(?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (f"panel_channel:{interaction.channel_id}", str(interaction.channel_id))
+            )
+        await interaction.response.send_message(
+            f"Painel publicado: {message.jump_url}", ephemeral=True
+        )
 
 
 class PortsBot(commands.Bot):
@@ -432,14 +506,98 @@ async def on_message(message):
         pass
 
 
-@bot.tree.command(name="painel", description="Abrir o painel administrativo do catálogo")
+@bot.tree.command(name="painel", description="Publicar o painel público do catálogo")
 async def painel(interaction: discord.Interaction):
     if not admin_user(interaction.user):
         await interaction.response.send_message("Sem permissão.", ephemeral=True)
         return
+
+    guild = interaction.guild
+    if guild is None:
+        await interaction.response.send_message(
+            "Execute este comando dentro do servidor Discord.", ephemeral=True
+        )
+        return
+
+    target_channel_id = PANEL_CHANNEL_ID or interaction.channel_id
+    target_channel = guild.get_channel(target_channel_id)
+    if target_channel is None:
+        try:
+            target_channel = await bot.fetch_channel(target_channel_id)
+        except (discord.NotFound, discord.Forbidden):
+            await interaction.response.send_message(
+                "Não consegui acessar o canal público configurado em PANEL_CHANNEL_ID. "
+                "Confira o ID e se o bot está no servidor com acesso a esse canal.",
+                ephemeral=True
+            )
+            return
+
+    if not hasattr(target_channel, "send"):
+        await interaction.response.send_message(
+            "PANEL_CHANNEL_ID não aponta para um canal de texto compatível.",
+            ephemeral=True
+        )
+        return
+
+    try:
+        perms = target_channel.permissions_for(guild.me)
+        missing = []
+        if not perms.view_channel:
+            missing.append("Ver canal")
+        if not perms.send_messages:
+            missing.append("Enviar mensagens")
+        if not perms.embed_links:
+            missing.append("Inserir links")
+        if missing:
+            await interaction.response.send_message(
+                "O bot não pode publicar no canal do painel. Permissões ausentes: "
+                + ", ".join(missing) + ".",
+                ephemeral=True
+            )
+            return
+
+        message = await target_channel.send(
+            embed=discord.Embed(
+                title="Catálogo de ports para PC",
+                description="Pesquise jogos pelo nome, veja a lista ou abra uma ficha individual com imagem e link de download.",
+                color=discord.Color.blurple()
+            ),
+            view=CatalogPanel()
+        )
+    except discord.Forbidden as exc:
+        code = getattr(exc, "code", None)
+        if code == 50001:
+            detail = (
+                "O bot não tem acesso ao canal público definido em PANEL_CHANNEL_ID. "
+                "Confirme o servidor, o ID do canal e as permissões."
+            )
+        else:
+            detail = (
+                "O Discord bloqueou a publicação. Permita ao bot Ver canal, "
+                "Enviar mensagens e Inserir links no canal público."
+            )
+        await interaction.response.send_message(detail, ephemeral=True)
+        return
+    except discord.HTTPException:
+        await interaction.response.send_message(
+            "O Discord não conseguiu publicar o painel. Confira o ID do canal e tente novamente.",
+            ephemeral=True
+        )
+        return
+
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (f"panel_message:{guild.id}", str(message.id))
+        )
+        conn.execute(
+            "INSERT INTO settings(key,value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (f"panel_channel:{guild.id}", str(target_channel.id))
+        )
     await interaction.response.send_message(
-        "Painel administrativo do catálogo:",
-        view=AdminView(),
+        f"Painel publicado em {target_channel.mention}: {message.jump_url}",
         ephemeral=True
     )
 
@@ -449,6 +607,11 @@ def main():
         raise RuntimeError(
             "A variável DISCORD_TOKEN não está configurada na hospedagem. "
             "Adicione o token do bot nas variáveis de ambiente."
+        )
+    if SOURCE_CHANNEL_ID and PANEL_CHANNEL_ID and SOURCE_CHANNEL_ID == PANEL_CHANNEL_ID:
+        log.warning(
+            "SOURCE_CHANNEL_ID e PANEL_CHANNEL_ID são iguais. "
+            "Recomendado usar um canal privado de origem e outro público para o painel."
         )
     bot.run(TOKEN)
 
