@@ -13,7 +13,11 @@ from dotenv import load_dotenv
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
 SOURCE_CHANNEL_ID = int(os.getenv("SOURCE_CHANNEL_ID", "0") or 0)
-ADMIN_ROLE_ID = int(os.getenv("ADMIN_ROLE_ID", "0") or 0)
+ADMIN_ROLE_IDS = {
+    int(role_id.strip())
+    for role_id in os.getenv("ADMIN_ROLE_ID", "").split(",")
+    if role_id.strip().isdigit()
+}
 GUILD_ID = int(os.getenv("GUILD_ID", "0") or 0)
 DB_PATH = os.getenv("DB_PATH", "catalog.db")
 
@@ -176,8 +180,10 @@ def admin_user(user):
     perms = getattr(user, "guild_permissions", None)
     if perms and (perms.administrator or perms.manage_guild):
         return True
-    return bool(ADMIN_ROLE_ID and any(getattr(r, "id", None) == ADMIN_ROLE_ID for r in getattr(user, "roles", [])))
-
+    return any(
+        role.id in ADMIN_ROLE_IDS
+        for role in getattr(user, "roles", [])
+    )
 
 def make_embed(game):
     embed = discord.Embed(title=game["name"], description=game["description"] or "Sem descrição cadastrada.",
@@ -385,87 +391,8 @@ def source_authorized(member):
     perms = getattr(member, "guild_permissions", None)
     if perms and (perms.administrator or perms.manage_guild):
         return True
-    return bool(ADMIN_ROLE_ID and any(getattr(r, "id", None) == ADMIN_ROLE_ID for r in getattr(member, "roles", [])))
-
-
-@bot.event
-async def on_ready():
-    log.info("Conectado como %s", bot.user)
-
-
-@bot.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
-        return
-    if not SOURCE_CHANNEL_ID or message.channel.id != SOURCE_CHANNEL_ID:
-        return
-    if not source_authorized(message.author):
-        log.warning("Mensagem ignorada: autor sem permissão (ID %s)", message.id)
-        return
-    data, error = parse_message(message)
-    if error:
-        try:
-            await message.reply(error, mention_author=False, delete_after=20)
-        except discord.HTTPException:
-            pass
-        return
-    game_id, status = save_game(data, source_message_id=message.id)
-    try:
-        await message.add_reaction("✅")
-        await message.reply(f"**{data['name']}** {status} no catálogo (ID `{game_id}`).",
-                            mention_author=False, delete_after=15)
-    except discord.HTTPException:
-        pass
-    log.info("Jogo %s: %s", status, data["name"])
-
-
-@bot.event
-async def on_raw_message_edit(payload):
-    if not SOURCE_CHANNEL_ID or payload.channel_id != SOURCE_CHANNEL_ID:
-        return
-    channel = bot.get_channel(payload.channel_id)
-    if channel is None:
-        try:
-            channel = await bot.fetch_channel(payload.channel_id)
-        except discord.HTTPException:
-            return
-    try:
-        message = await channel.fetch_message(payload.message_id)
-    except (discord.HTTPException, AttributeError):
-        return
-    if message.author.bot or not source_authorized(message.author):
-        return
-    data, error = parse_message(message)
-    if not error:
-        save_game(data, source_message_id=message.id)
-
-
-@bot.tree.command(name="catalogo", description="Abre o catálogo de ports para PC")
-async def catalogo(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=discord.Embed(title="Catálogo de ports para PC",
-                            description="Pesquise um jogo ou navegue pela lista.",
-                            color=discord.Color.blurple()),
-        view=CatalogPanel(), ephemeral=True
+    return any(
+        role.id in ADMIN_ROLE_IDS
+        for role in getattr(member, "roles", [])
     )
 
-
-@bot.tree.command(name="painel", description="Abre a administração do catálogo")
-async def painel(interaction: discord.Interaction):
-    if not admin_user(interaction.user):
-        return await interaction.response.send_message("Apenas administradores podem usar este comando.", ephemeral=True)
-    await interaction.response.send_message("**Painel administrativo**", view=AdminView(), ephemeral=True)
-
-
-@bot.tree.command(name="jogo", description="Abre um jogo pelo ID do catálogo")
-@app_commands.describe(game_id="ID numérico do jogo")
-async def jogo(interaction: discord.Interaction, game_id: int):
-    game = get_game(game_id)
-    if not game:
-        return await interaction.response.send_message("Jogo não encontrado.", ephemeral=True)
-    await interaction.response.send_message(embed=make_embed(game), view=GameButtons(game_id), ephemeral=True)
-
-
-if not TOKEN:
-    raise SystemExit("Configure DISCORD_TOKEN no arquivo .env antes de iniciar.")
-bot.run(TOKEN)

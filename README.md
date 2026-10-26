@@ -64,3 +64,6 @@ O bot também tenta reconhecer embeds e anexos de imagem. Posts novos são impor
 - O projeto foi verificado quanto à sintaxe, mas precisa ser testado conectado ao seu servidor.
 - Use apenas links de downloads que você tenha autorização para compartilhar. O bot não hospeda arquivos: apenas apresenta o link cadastrado.
 - Mantenha `catalog.db` e não publique o arquivo `.env`.
+
+
+**IDs de cargos:** `ADMIN_ROLE_ID` aceita vários IDs separados por vírgula, por exemplo `ADMIN_ROLE_ID=111111111111111111,222222222222222222`.
